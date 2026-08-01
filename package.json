@@ -1,0 +1,25 @@
+{
+  "name": "realms-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stateless Helius-webhook bot that pushes ToolboxDAO governance proposal events to Telegram (Discord later).",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "set -a; [ -f .env ] && . ./.env; set +a; wrangler deploy",
+    "fixtures": "node scripts/generate-fixtures.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@scure/base": "^1.1.9"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.1",
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.118.0"
+  }
+}

@@ -1,0 +1,5 @@
+// Local `wrangler dev` secrets go here (do NOT commit this file).
+# RPC_URL=http://127.0.0.1:8899
+# WEBHOOK_SECRET=change-me
+# TELEGRAM_BOT_TOKEN=123456:ABC...
+# TELEGRAM_CHAT_ID=@toolboxdao_proposals

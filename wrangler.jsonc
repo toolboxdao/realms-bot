@@ -1,0 +1,36 @@
+// Cloudflare Worker + Durable Object configuration for the realms-bot.
+// Static ToolboxDAO addresses live in [vars]; runtime secrets (RPC, Telegram,
+// webhook auth) are injected via `wrangler secret put`.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "realms-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-15",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // In the Cloudflare dashboard / local `wrangler dev` these come from [vars].
+  // For production, override RPC_URL with your Helius endpoint via a secret.
+  "vars": {
+    "GOV_PROGRAM": "GovER5Lthms3bLBqWub97yVrMmEogzX7xNjdXpPPCVZw",
+    "TOOLBOX_REALM": "Dsh5QZbhK7MLoC8cxaNwL5Nta2rrLiDWuRA4gnkLfopi",
+    "GOVERNANCE": "5Nn7GMBt1YrPWuzZ7nwY8kBsLkaUhCunnQM9nYaD1MZm",
+    "COMMUNITY_MINT": "tboxhozCDDv74fcHuNJuhL1AzZQNi3V2u8PQ2cFLPH8",
+    "REALM_NAME": "ToolboxDAO",
+    "REALMS_URL": "https://realms.today",
+    "TOKEN_DECIMALS": "6",
+    "EVENT_CREATED": "true",
+    "EVENT_VOTING_OPEN": "true",
+    "EVENT_ENDED": "true",
+    "EVENT_REMINDER": "false"
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "GOVERNANCE_BOT", "class_name": "GovernanceBotDO" }]
+  },
+
+  "exports": {
+    "GovernanceBotDO": { "type": "durable-object", "storage": "sqlite" }
+  },
+
+  "observability": { "enabled": true }
+}

@@ -18,7 +18,7 @@ export interface HeliusEvent {
   blockTime?: number;
   transaction?: {
     message?: {
-      accountKeys?: string[];
+      accountKeys?: Array<string | { pubkey?: string }>;
       instructions?: HeliusInstruction[];
     };
   };
@@ -42,6 +42,17 @@ export function normalizeWebhook(payload: unknown): HeliusEvent[] {
   return [];
 }
 
+/**
+ * Account key entries can be either a plain base58 string (`encoding: base64`)
+ * or an object `{ pubkey, signer, writable, source }` (the jsonParsed form that
+ * Helius delivers for `encoding: "json"`). Normalise both to the pubkey string.
+ */
+function keyAddr(key: string | { pubkey?: string } | undefined): string | undefined {
+  if (key == null) return undefined;
+  if (typeof key === 'string') return key;
+  return key.pubkey;
+}
+
 /** Extract candidate account keys that governance instructions touch. */
 export function extractCandidateKeys(event: HeliusEvent, programB58: string): string[] {
   const found = new Set<string>();
@@ -52,10 +63,9 @@ export function extractCandidateKeys(event: HeliusEvent, programB58: string): st
     for (const ix of msg.instructions) {
       const pid = ix.programIdIndex;
       if (pid === undefined) continue;
-      const program = accountKeys[pid];
-      if (program !== programB58) continue;
+      if (keyAddr(accountKeys[pid]) !== programB58) continue;
       for (const idx of ix.accounts ?? []) {
-        const key = accountKeys[idx];
+        const key = keyAddr(accountKeys[idx]);
         if (key) found.add(key);
       }
     }

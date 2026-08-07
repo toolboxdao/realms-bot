@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractCandidateKeys, type HeliusEvent } from '../src/parse/events';
+import { extractCandidateKeys, eventSignature, type HeliusEvent } from '../src/parse/events';
 
 const PROGRAM = 'GovER5Lthms3bLBqWub97yVrMmEogzX7xNjdXpPPCVZw';
 const GOVERNANCE = '5Nn7GMBt1YrPWuzZ7nwY8kBsLkaUhCunnQM9nYaD1MZm';
@@ -52,5 +52,23 @@ describe('extractCandidateKeys', () => {
 
   it('returns [] for a completely empty event', () => {
     expect(extractCandidateKeys({}, PROGRAM)).toEqual([]);
+  });
+});
+
+describe('eventSignature', () => {
+  it("reads the signature from transaction.signatures[0] (real Helius raw shape)", () => {
+    const event: HeliusEvent = {
+      transaction: { signatures: ['5Nn7sig123'] },
+    };
+    expect(eventSignature(event)).toBe('5Nn7sig123');
+  });
+
+  it('prefers the top-level signature when present (enhanced shape)', () => {
+    const event: HeliusEvent = { signature: 'top-sig', transaction: { signatures: ['nested-sig'] } };
+    expect(eventSignature(event)).toBe('top-sig');
+  });
+
+  it('returns undefined when there is no signature anywhere', () => {
+    expect(eventSignature({})).toBeUndefined();
   });
 });

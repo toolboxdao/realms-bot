@@ -17,6 +17,7 @@ export interface HeliusEvent {
   slot?: number;
   blockTime?: number;
   transaction?: {
+    signatures?: string[];
     message?: {
       accountKeys?: Array<string | { pubkey?: string }>;
       instructions?: HeliusInstruction[];
@@ -84,6 +85,9 @@ export function extractCandidateKeys(event: HeliusEvent, programB58: string): st
   return [...found];
 }
 
+/** Signature to dedup on. Helius "raw" webhooks mirror the getTransaction
+ * response, where the signature lives at `transaction.signatures[0]` — not at
+ * the top level. Accept both so all delivery shapes are covered. */
 export function eventSignature(event: HeliusEvent): string | undefined {
-  return event?.signature;
+  return event?.signature ?? event?.transaction?.signatures?.[0];
 }

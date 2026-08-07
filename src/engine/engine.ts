@@ -84,6 +84,23 @@ function stateLabel(state: number): string {
   }
 }
 
+/**
+ * Build the ended result detail (status label + tally + quorum) from a single
+ * decoded proposal snapshot. Extracted so callers can rebuild it from a
+ * freshly-read (settled) snapshot instead of a mid-finalization read.
+ */
+export function buildEndedDetail(proposal: DecodedProposal, gov: GovernanceCtx): EndedDetail {
+  const yes = proposal.options[0]?.voteWeight ?? 0n;
+  const no = proposal.denyVoteWeight ?? 0n;
+  const maxVoteWeight = proposal.maxVoteWeight ?? gov.maxVoteWeight ?? null;
+  const pct = gov.communityVoteThresholdPct;
+  let quorum: bigint | null = null;
+  if (maxVoteWeight != null && pct != null) {
+    quorum = (maxVoteWeight * BigInt(pct)) / 100n;
+  }
+  return { status: stateLabel(proposal.state), yes, no, quorum, pct };
+}
+
 export function detectProposalEvents(input: DetectInput): {
   notifications: Notification[];
   next: ProposalSnapshot;
@@ -128,23 +145,7 @@ export function detectProposalEvents(input: DetectInput): {
 
   // 3) Ended: previous non-terminal -> now terminal (final state).
   if (events.ended && prev && !isTerminalState(prev.state) && isTerminalState(proposal.state)) {
-    const maxVoteWeight = proposal.maxVoteWeight ?? gov.maxVoteWeight ?? null;
-    const pct = gov.communityVoteThresholdPct;
-    let quorum: bigint | null = null;
-    if (maxVoteWeight != null && pct != null) {
-      quorum = (maxVoteWeight * BigInt(pct)) / 100n;
-    }
-    notifications.push({
-      kind: 'ended',
-      ...base,
-      ended: {
-        status: stateLabel(proposal.state),
-        yes,
-        no,
-        quorum,
-        pct,
-      },
-    });
+    notifications.push({ kind: 'ended', ...base, ended: buildEndedDetail(proposal, gov) });
   }
 
   // 4) Optional: remind ~24h before voting closes.

@@ -15,10 +15,12 @@ import {
 } from '../parse/events';
 import {
   detectProposalEvents,
+  buildEndedDetail,
   type GovernanceCtx,
   type ProposalSnapshot,
   type Notification,
 } from '../engine/engine';
+import { isTerminalState } from '../config';
 import { formatNotification } from '../notify/messages';
 import {
   DiscordNotifier,
@@ -163,6 +165,25 @@ export class GovernanceBotDO extends DurableObject<Env> {
       snap.reminderSent ? 1 : 0,
       Date.now(),
     );
+  }
+
+  /** Fresh, point-in-time read of a governance proposal account. Null if not
+   * ours / unparseable / RPC error. Used to report settled ended results. */
+  private async readProposal(
+    pk: string,
+    programB58: string,
+  ): Promise<ReturnType<typeof decodeProposalV2> | null> {
+    try {
+      const info = await this.rpc.getAccountInfo(pk);
+      if (!info || info.owner !== programB58) return null;
+      const data = b64decode(info.data);
+      if (data[0] !== AccountType.ProposalV2) return null;
+      const decoded = decodeProposalV2(data);
+      if (!bytesEqual(decoded.governance, this.cfg.governancePk)) return null;
+      return decoded;
+    } catch {
+      return null;
+    }
   }
 
   // ---------------- governance / realm context ----------------
@@ -316,6 +337,23 @@ export class GovernanceBotDO extends DurableObject<Env> {
           now,
         });
         planned.push({ pk, next, notifications });
+      }
+
+      // Ended results: finalization is often a burst of governance txs
+      // (vote + finalize + execute) within seconds, and a webhook delivery can
+      // read a transient/inconsistent proposal state that isn't the settled
+      // outcome. Give the chain a moment to settle, then re-read the proposal
+      // and report the final (settled) result — correct state + final tally.
+      if (planned.some((p) => p.notifications.some((n) => n.kind === 'ended'))) {
+        await new Promise((r) => setTimeout(r, 2000));
+        for (const p of planned) {
+          const idx = p.notifications.findIndex((n) => n.kind === 'ended');
+          if (idx === -1) continue;
+          const fresh = await this.readProposal(p.pk, programB58);
+          if (fresh && isTerminalState(fresh.state)) {
+            p.notifications[idx]!.ended = buildEndedDetail(fresh, gov);
+          }
+        }
       }
 
       // Send everything first (so a failure triggers a Helius retry, keeping

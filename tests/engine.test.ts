@@ -82,11 +82,23 @@ describe('detectProposalEvents', () => {
     expect(res2.notifications.map((n) => n.kind)).not.toContain('voting_open');
   });
 
-  it('does not emit `ended` for a terminal proposal that is first seen (no spam on backfill)', () => {
-    const res = detectProposalEvents({ prev: null, proposal: makeProposal({ state: 5, votingCompletedAt: 150n }), ...base });
+  it('emits `ended` (not `created`) for a proposal first seen already completed', () => {
+    const res = detectProposalEvents({
+      prev: null,
+      proposal: makeProposal({
+        state: 5,
+        votingCompletedAt: 150n,
+        options: [{ label: 'Approve', voteWeight: 30000000000000000n, voteResult: 0 }],
+        maxVoteWeight: 99999999999000000n,
+      }),
+      ...base,
+    });
     const kinds = res.notifications.map((n) => n.kind);
-    expect(kinds).toContain('created');
-    expect(kinds).not.toContain('ended');
+    expect(kinds).toContain('ended');
+    expect(kinds).not.toContain('created');
+    // and it does not re-fire on a later delivery of the same terminal state
+    const res2 = detectProposalEvents({ prev: res.next, proposal: makeProposal({ state: 5 }), ...base });
+    expect(res2.notifications.map((n) => n.kind)).not.toContain('ended');
   });
 
   it('emits `ended` Succeeded with quorum when voting transitions to a final state', () => {

@@ -130,8 +130,8 @@ export function detectProposalEvents(input: DetectInput): {
     proposalUrl: input.proposalUrl,
   };
 
-  // 1) Created: first time we ever see this proposal.
-  if (events.created && prev === null) {
+  // 1) Created: first time we ever see this proposal, and it isn't already over.
+  if (events.created && prev === null && !isTerminalState(proposal.state)) {
     notifications.push({ kind: 'created', ...base });
   }
 
@@ -143,8 +143,15 @@ export function detectProposalEvents(input: DetectInput): {
     }
   }
 
-  // 3) Ended: previous non-terminal -> now terminal (final state).
-  if (events.ended && prev && !isTerminalState(prev.state) && isTerminalState(proposal.state)) {
+  // 3) Ended: proposal reached a terminal (final) state. Also fires on first
+  // encounter when we missed the non-terminal phase (e.g. a rapid create +
+  // finalize/execute) — otherwise a proposal that is already over would only
+  // produce a "created" and never report its result.
+  if (
+    events.ended &&
+    isTerminalState(proposal.state) &&
+    (prev === null || !isTerminalState(prev.state))
+  ) {
     notifications.push({ kind: 'ended', ...base, ended: buildEndedDetail(proposal, gov) });
   }
 

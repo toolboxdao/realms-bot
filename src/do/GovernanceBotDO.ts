@@ -33,6 +33,15 @@ import type { Env } from '../types';
 
 const GOV_CACHE_TTL_MS = 5 * 60 * 1000;
 
+/** SPL Token / Token-2022 program ids (owners of mint accounts). */
+const TOKEN_PROGRAMS = new Set([
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+]);
+
+/** Backoff schedule for the "settled ended result" re-reads (see handleWebhook). */
+const SETTLE_DELAYS_MS = [2000, 5000, 8000];
+
 /**
  * Stateless webhook pattern: the Worker's /webhook endpoint keeps no state.
  * All idempotency + proposal snapshots live in this Durable Object's SQLite
@@ -43,6 +52,32 @@ export class GovernanceBotDO extends DurableObject<Env> {
   private rpc = createRpc(this.cfg.rpcUrl);
   private notifiers: Notifier[] | null = null;
   private govCache: { ts: number; ctx: GovernanceCtx } | null = null;
+  private mintDecimalsCache = new Map<string, number>();
+
+  /**
+   * Decimals of a governing token mint (council tokens have 0, community has
+   * cfg.tokenDecimals). Cached per mint; falls back to cfg.tokenDecimals.
+   */
+  private async mintDecimals(mintPk: Uint8Array): Promise<number> {
+    const b58 = pkToB58(mintPk);
+    const hit = this.mintDecimalsCache.get(b58);
+    if (hit != null) return hit;
+    try {
+      const info = await this.rpc.getAccountInfo(b58);
+      if (info && TOKEN_PROGRAMS.has(info.owner)) {
+        const data = b64decode(info.data);
+        // SPL Mint: COption authority (36) + supply u64 (8) + decimals u8 @44.
+        if (data.length >= 45) {
+          const decimals = data[44];
+          this.mintDecimalsCache.set(b58, decimals);
+          return decimals;
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+    return this.cfg.tokenDecimals;
+  }
 
   private get sql() {
     return this.ctx.storage.sql;
@@ -321,11 +356,17 @@ export class GovernanceBotDO extends DurableObject<Env> {
       }
 
       // Collect notifications for this transaction; send all, then persist.
-      const planned: Array<{ pk: string; next: ProposalSnapshot; notifications: Notification[] }> = [];
+      const planned: Array<{
+        pk: string;
+        next: ProposalSnapshot;
+        notifications: Notification[];
+        mintDecimals?: number;
+      }> = [];
       const now = Math.floor(Date.now() / 1000);
       for (const { pk, decoded } of touched) {
         const prev = this.getSnapshot(pk);
         const proposalUrl = realmProposalUrl(this.cfg.realmsUrl, realmB58, pk);
+        const md = await this.mintDecimals(decoded.governingTokenMint);
         const { notifications, next } = detectProposalEvents({
           prev,
           proposal: decoded,
@@ -335,23 +376,42 @@ export class GovernanceBotDO extends DurableObject<Env> {
           events: this.cfg.events,
           gov,
           now,
+          mintDecimals: md,
         });
-        planned.push({ pk, next, notifications });
+        planned.push({ pk, next, notifications, mintDecimals: md });
       }
 
       // Ended results: finalization is often a burst of governance txs
       // (vote + finalize + execute) within seconds, and a webhook delivery can
       // read a transient/inconsistent proposal state that isn't the settled
-      // outcome. Give the chain a moment to settle, then re-read the proposal
-      // and report the final (settled) result — correct state + final tally.
+      // outcome — most visibly a zero tally while the aggregate vote weights
+      // are still being written. Re-read with backoff until the tally settles
+      // (or attempts run out) so the reported result is the final one.
       if (planned.some((p) => p.notifications.some((n) => n.kind === 'ended'))) {
-        await new Promise((r) => setTimeout(r, 2000));
-        for (const p of planned) {
-          const idx = p.notifications.findIndex((n) => n.kind === 'ended');
-          if (idx === -1) continue;
-          const fresh = await this.readProposal(p.pk, programB58);
-          if (fresh && isTerminalState(fresh.state)) {
-            p.notifications[idx]!.ended = buildEndedDetail(fresh, gov);
+        for (const delay of SETTLE_DELAYS_MS) {
+          const pending: Array<{ p: (typeof planned)[number]; idx: number }> = [];
+          for (const p of planned) {
+            const idx = p.notifications.findIndex((n) => n.kind === 'ended');
+            if (idx === -1) continue;
+            const d = p.notifications[idx]!.ended!;
+            // Zero yes+no on a Succeeded/Executing result almost always means
+            // the aggregates weren't written yet; genuinely-zero Defeated/
+            // Cancelled results cost us only the extra retries, not accuracy.
+            if (d.yes === 0n && d.no === 0n) pending.push({ p, idx });
+          }
+          if (pending.length === 0) break;
+          await new Promise((r) => setTimeout(r, delay));
+          for (const { p, idx } of pending) {
+            const fresh = await this.readProposal(p.pk, programB58);
+            if (fresh && isTerminalState(fresh.state)) {
+              p.notifications[idx]!.ended = buildEndedDetail(fresh, gov, p.mintDecimals);
+              // Persist the settled values too, so the stored snapshot matches
+              // what we reported.
+              p.next.state = fresh.state;
+              p.next.yes = (fresh.options[0]?.voteWeight ?? 0n).toString();
+              p.next.no = (fresh.denyVoteWeight ?? 0n).toString();
+              if (fresh.votingCompletedAt != null) p.next.votingCompletedAt = Number(fresh.votingCompletedAt);
+            }
           }
         }
       }

@@ -103,11 +103,11 @@ describe('detectProposalEvents', () => {
 
   it('emits `ended` Succeeded with quorum when voting transitions to a final state', () => {
     const prev: ProposalSnapshot = { state: 2, votingAt: 100n, votingCompletedAt: null, yes: '0', no: '0', name: 'x', reminderSent: false };
-    const proposal = makeProposal({ state: 5, options: [{ label: 'Approve', voteWeight: 30000000000000000n, voteResult: 0 }], denyVoteWeight: 0n, votingCompletedAt: 150n, maxVoteWeight: 99999999999000000n });
+    const proposal = makeProposal({ state: 3, options: [{ label: 'Approve', voteWeight: 30000000000000000n, voteResult: 0 }], denyVoteWeight: 0n, votingCompletedAt: 150n, maxVoteWeight: 99999999999000000n });
     const res = detectProposalEvents({ prev, proposal, ...base });
     const ended = res.notifications.find((n) => n.kind === 'ended');
     expect(ended).toBeDefined();
-    expect(ended!.ended!.status).toBe('✅ Succeeded');
+    expect(ended!.ended!.status).toBe('✅ Succeeded (passed, awaiting execution)');
     expect(ended!.ended!.yes).toBe(30000000000000000n);
     // quorum = 20% of 99999999999000000n
     expect(ended!.ended!.quorum).toBe((99999999999000000n * 20n) / 100n);
@@ -116,9 +116,35 @@ describe('detectProposalEvents', () => {
 
   it('emits `ended` Defeated when no-side wins', () => {
     const prev: ProposalSnapshot = { state: 2, votingAt: 100n, votingCompletedAt: null, yes: '0', no: '0', name: 'x', reminderSent: false };
-    const proposal = makeProposal({ state: 4, options: [{ label: 'Approve', voteWeight: 0n, voteResult: 0 }], denyVoteWeight: 500n, votingCompletedAt: 150n, maxVoteWeight: 99999999999000000n });
+    const proposal = makeProposal({ state: 7, options: [{ label: 'Approve', voteWeight: 0n, voteResult: 0 }], denyVoteWeight: 500n, votingCompletedAt: 150n, maxVoteWeight: 99999999999000000n });
     const res = detectProposalEvents({ prev, proposal, ...base });
     expect(res.notifications.find((n) => n.kind === 'ended')!.ended!.status).toBe('❌ Defeated');
+  });
+
+  it('reports a passed council proposal (state 3, 0-decimal token) correctly', () => {
+    // Regression: ToolboxDAO "Onboard guardian council to council 1/2" —
+    // real on-chain values: Succeeded(3), 3 yes council votes, no quorum math
+    // on a 4-member council, governing token (council mint) has 0 decimals.
+    const prev: ProposalSnapshot = { state: 2, votingAt: 100n, votingCompletedAt: null, yes: '0', no: '0', name: 'x', reminderSent: false };
+    const proposal = makeProposal({
+      state: 3,
+      options: [{ label: 'Approve', voteWeight: 3n, voteResult: 1 }],
+      denyVoteWeight: 0n,
+      votingCompletedAt: 150n,
+      maxVoteWeight: 4n,
+      voteThreshold: { type: 0, value: 70 },
+    });
+    const res = detectProposalEvents({ prev, proposal, mintDecimals: 0, ...base });
+    const ended = res.notifications.find((n) => n.kind === 'ended');
+    expect(ended).toBeDefined();
+    expect(ended!.ended!.status).toBe('✅ Succeeded (passed, awaiting execution)');
+    expect(ended!.ended!.yes).toBe(3n);
+    expect(ended!.ended!.no).toBe(0n);
+    // proposal-level 70% threshold beats the gov-config 20%
+    expect(ended!.ended!.pct).toBe(70);
+    // ceil(4 * 70 / 100) = 3
+    expect(ended!.ended!.quorum).toBe(3n);
+    expect(ended!.ended!.decimals).toBe(0);
   });
 
   it('persists the next snapshot for later transitions', () => {

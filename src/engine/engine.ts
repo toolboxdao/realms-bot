@@ -30,10 +30,12 @@ export type NotificationKind = 'created' | 'voting_open' | 'ended' | 'reminder';
 
 export interface EndedDetail {
   status: string;
-  yes: bigint;
+  yes: bigint; // raw base units
   no: bigint;
   quorum: bigint | null;
   pct: number | null;
+  /** Decimals of the proposal's governing token (council tokens often have 0). */
+  decimals?: number;
 }
 
 export interface Notification {
@@ -61,6 +63,8 @@ export interface DetectInput {
   events: EventFlags;
   gov: GovernanceCtx;
   now: number; // unix seconds
+  /** Governing-token decimals for tally formatting (see EndedDetail.decimals). */
+  mintDecimals?: number;
 }
 
 /** Number of seconds (~5 min) tolerated either side of the 24h reminder window. */
@@ -70,13 +74,17 @@ const REMINDER_LEAD_SEC = 24 * 60 * 60;
 function stateLabel(state: number): string {
   switch (state) {
     case ProposalState.Succeeded:
+      return '✅ Succeeded (passed, awaiting execution)';
     case ProposalState.Executing:
+      return '✅ Succeeded (executing)';
     case ProposalState.Completed:
-      return '✅ Succeeded';
+      return '✅ Succeeded (executed)';
     case ProposalState.Defeated:
       return '❌ Defeated';
     case ProposalState.Cancelled:
       return '🚫 Cancelled';
+    case ProposalState.ExecutingWithErrors:
+      return '⚠️ Executing with errors';
     case ProposalState.Vetoed:
       return '🛑 Vetoed';
     default:
@@ -88,17 +96,29 @@ function stateLabel(state: number): string {
  * Build the ended result detail (status label + tally + quorum) from a single
  * decoded proposal snapshot. Extracted so callers can rebuild it from a
  * freshly-read (settled) snapshot instead of a mid-finalization read.
+ *
+ * `decimals` is the governing token's decimals (callers look it up from the
+ * mint; council tokens have 0, so omitting it would render Yes votes as 0).
  */
-export function buildEndedDetail(proposal: DecodedProposal, gov: GovernanceCtx): EndedDetail {
+export function buildEndedDetail(proposal: DecodedProposal, gov: GovernanceCtx, decimals?: number): EndedDetail {
   const yes = proposal.options[0]?.voteWeight ?? 0n;
   const no = proposal.denyVoteWeight ?? 0n;
   const maxVoteWeight = proposal.maxVoteWeight ?? gov.maxVoteWeight ?? null;
-  const pct = gov.communityVoteThresholdPct;
+  // Prefer the proposal's own recorded threshold (what actually governed this
+  // vote — e.g. a 70% YesVotePercentage on a council proposal) over the
+  // governance-config community threshold.
+  const propThreshold =
+    proposal.voteThreshold && proposal.voteThreshold.value != null
+      ? proposal.voteThreshold.value
+      : null;
+  const pct = propThreshold ?? gov.communityVoteThresholdPct;
   let quorum: bigint | null = null;
   if (maxVoteWeight != null && pct != null) {
-    quorum = (maxVoteWeight * BigInt(pct)) / 100n;
+    // Round up: truncating would print "Quorum: 0" for small councils
+    // (e.g. maxVoteWeight 4 × 20% = 0.8 -> 0) even though a quorum is required.
+    quorum = (maxVoteWeight * BigInt(pct) + 99n) / 100n;
   }
-  return { status: stateLabel(proposal.state), yes, no, quorum, pct };
+  return { status: stateLabel(proposal.state), yes, no, quorum, pct, decimals };
 }
 
 export function detectProposalEvents(input: DetectInput): {
@@ -152,7 +172,7 @@ export function detectProposalEvents(input: DetectInput): {
     isTerminalState(proposal.state) &&
     (prev === null || !isTerminalState(prev.state))
   ) {
-    notifications.push({ kind: 'ended', ...base, ended: buildEndedDetail(proposal, gov) });
+    notifications.push({ kind: 'ended', ...base, ended: buildEndedDetail(proposal, gov, input.mintDecimals) });
   }
 
   // 4) Optional: remind ~24h before voting closes.

@@ -16,21 +16,30 @@ export const AccountType = {
   ProposalV2: 14,
 } as const;
 
-/** spl-governance ProposalState enum. */
+/**
+ * spl-governance ProposalState enum, as serialized by the deployed GovER5..
+ * program. VERIFIED against 71 live ToolboxDAO proposal accounts and the
+ * @solana/spl-governance SDK enum (0.3.x): Draft 0, SigningOff 1, Voting 2,
+ * Succeeded 3, Executing 4, Completed 5, Cancelled 6, Defeated 7,
+ * ExecutingWithErrors 8, Vetoed 9.
+ * (An earlier version of this table was shifted by one from 3..8, which made
+ * passed-but-not-yet-executed proposals (Succeeded=3) alert as "Cancelled".)
+ */
 export const ProposalState = {
   Draft: 0,
   SigningOff: 1,
   Voting: 2,
-  Cancelled: 3,
-  Defeated: 4,
-  Succeeded: 5,
-  Executing: 6,
-  Completed: 7,
-  Vetoed: 8,
+  Succeeded: 3,
+  Executing: 4,
+  Completed: 5,
+  Cancelled: 6,
+  Defeated: 7,
+  ExecutingWithErrors: 8,
+  Vetoed: 9,
 } as const;
 
 export function isTerminalState(state: number): boolean {
-  return state >= ProposalState.Cancelled; // 3..8 are final
+  return state >= ProposalState.Succeeded; // 3..9 are final
 }
 
 export interface Config {

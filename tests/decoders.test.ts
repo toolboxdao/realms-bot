@@ -55,7 +55,7 @@ describe('ProposalV2 decoder (real ToolboxDAO data)', () => {
       const d = decodeProposalV2(b64decode(f.data));
       expect(bytesEqual(d.governance, govBytes), f.pubkey).toBe(true);
       expect(d.state).toBeGreaterThanOrEqual(0);
-      expect(d.state).toBeLessThanOrEqual(8);
+      expect(d.state).toBeLessThanOrEqual(9);
       expect(d.name.length).toBeGreaterThan(0);
       expect(d.options.length).toBeGreaterThan(0);
     }
@@ -70,10 +70,10 @@ describe('ProposalV2 decoder (real ToolboxDAO data)', () => {
     expect(d.maxVoteWeight).toBeNull();
   });
 
-  it('matches SDK truth for a Succeeded "Vsr Grant"', () => {
+  it('matches SDK truth for a completed "Vsr Grant"', () => {
     const d = decodeProposalV2(proposalData(VSR_GRANT));
     expect(d.name).toBe('Vsr Grant');
-    expect(d.state).toBe(5); // Succeeded
+    expect(d.state).toBe(5); // Completed (executed)
     expect(d.options[0].voteWeight).toBe(3n);
     expect(d.maxVoteWeight).toBe(4n);
   });

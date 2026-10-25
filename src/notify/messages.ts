@@ -34,13 +34,16 @@ export function formatNotification(n: Notification, cfg: Config): string {
       ].join('\n');
     case 'ended': {
       const e = n.ended!;
+      // Tally/quorum are in the proposal's governing-token units — council
+      // tokens have 0 decimals, so don't reuse the community token's value.
+      const dec = e.decimals ?? cfg.tokenDecimals;
       const lines = [`🏁 Proposal ended`, `“${n.proposalName}”`, ``, `Result: ${e.status}`];
       lines.push(
-        `Yes: ${fmtToken(e.yes, cfg.tokenDecimals)} | No: ${fmtToken(e.no, cfg.tokenDecimals)}`,
+        `Yes: ${fmtToken(e.yes, dec)} | No: ${fmtToken(e.no, dec)}`,
       );
       if (e.pct != null) {
         lines.push(
-          `Quorum: ${fmtToken(e.quorum ?? 0n, cfg.tokenDecimals)} (${e.pct}% threshold)`,
+          `Quorum: ${fmtToken(e.quorum ?? 0n, dec)} (${e.pct}% threshold)`,
         );
       }
       lines.push(``, `🔗 ${n.proposalUrl}`);

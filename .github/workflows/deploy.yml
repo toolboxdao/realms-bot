@@ -38,8 +38,6 @@ jobs:
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
-          api_key: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
-          gitCommitter: none
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
